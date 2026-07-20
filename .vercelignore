@@ -1,0 +1,5 @@
+backend/
+Dockerfile.frontend
+docker-compose.yml
+verify_deployment.py
+*.bat
