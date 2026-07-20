@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Zap, Camera, Hand, MessageSquare, Mic } from 'lucide-react'
+import { Zap, Hand, MessageSquare, Mic } from 'lucide-react'
 import Logo from './Logo'
 
 // Hand landmark positions — shifted up 75px total from original to clear overlay

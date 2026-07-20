@@ -10,6 +10,7 @@ interface LogoProps {
   className?: string
   /** @deprecated The logo is now a unified mark. Use iconOnly to show just the symbol. */
   showText?: boolean
+  textSize?: string
 }
 
 /**

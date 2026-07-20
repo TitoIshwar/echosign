@@ -16,7 +16,7 @@ interface DemoState {
   setIsSpeaking: (speaking: boolean) => void
 }
 
-export const useDemoStore = create<DemoState>((set, get) => ({
+export const useDemoStore = create<DemoState>((set) => ({
   isWebcamActive: false,
   detectedSign: 'Waiting...',
   generatedSentence: 'Activate webcam to begin recognition',

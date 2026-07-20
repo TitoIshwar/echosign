@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Webcam from 'react-webcam'
 import {
-  Camera, CameraOff, Mic, MicOff, Download, Trash2,
+  Camera, CameraOff, Download, Trash2,
   Hand, MessageSquare, Zap, Volume2, VolumeX, Activity,
   RefreshCw, WifiOff, Wifi
 } from 'lucide-react'
@@ -240,8 +240,8 @@ function WaveformDisplay({ active }: { active: boolean }) {
 export default function LiveDemo() {
   const {
     isWebcamActive, detectedSign, generatedSentence, confidence,
-    isListening, transcript, isSpeaking,
-    toggleWebcam, setDetectedSign, toggleListening, addToTranscript,
+    transcript, isSpeaking,
+    toggleWebcam, setDetectedSign, addToTranscript,
     clearTranscript, setIsSpeaking,
   } = useDemoStore()
 

@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import {
   Zap, Cpu, FileText, Volume2, BookOpen, Briefcase,
-  MessageCircle, Shield, Globe, Wifi, Layers, Sparkles
+  MessageCircle, Shield, Globe, Sparkles
 } from 'lucide-react'
 
 const features = [
