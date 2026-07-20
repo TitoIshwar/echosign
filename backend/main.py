@@ -7,6 +7,12 @@ import time
 import threading
 import traceback
 
+# ─── Suppress MediaPipe / TFLite / GLOG telemetry spam ───────────────────────
+os.environ.setdefault("GLOG_minloglevel",     "3")   # suppress INFO/WARNING/ERROR
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")   # suppress TF logs
+os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")   # Windows: force CPU
+os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1") # no .pyc files
+
 import numpy as np
 import cv2
 import joblib
@@ -81,10 +87,12 @@ if hasattr(model, 'steps'):
     print(f"[INFO] Pipeline steps : {step_names}")
     clf = model.steps[-1][1]
 
-# Optimise Random Forest prediction speed for single row inference
+# Optimise Random Forest: use all CPU cores for parallel tree evaluation.
+# n_jobs=-1 enables multi-core parallelism across trees in predict_proba,
+# which significantly reduces single-sample inference latency.
 if hasattr(clf, 'n_jobs'):
-    clf.n_jobs = 1
-    print("[INFO] Set classifier n_jobs = 1 to optimize single-row prediction speed.")
+    clf.n_jobs = -1
+    print(f"[INFO] Set classifier n_jobs = -1 (all CPU cores) for parallel inference.")
 
 
 n_features = getattr(clf, "n_features_in_", None)
@@ -140,12 +148,15 @@ print("[INFO] " + "-" * 59)
 # ─── FastAPI app ──────────────────────────────────────────────────────────────
 app = FastAPI(title="EchoSign API", version="2.0.0")
 
+# Allow all origins — works for both local dev (localhost:5173) and production.
+# Restrict to specific domains in a secured production deployment if needed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # One request at a time — non-blocking so the caller gets HTTP 429 immediately
@@ -321,4 +332,13 @@ def predict(req: PredictRequest):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"[INFO] Starting Uvicorn on {host}:{port}")
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        reload=False,
+        log_level="warning",   # reduce noisy INFO logs from uvicorn itself
+        access_log=True,
+    )

@@ -8,7 +8,11 @@ import {
 } from 'lucide-react'
 import { useDemoStore } from '../store/demoStore'
 
-const API_URL = 'http://localhost:8000'
+// API URL configuration:
+// - In development: Vite proxy routes /predict and /health to backend (no CORS issues)
+// - In production: Set VITE_API_URL to your deployed backend URL
+// - Default fallback: direct connection to localhost:8000
+const API_URL = (import.meta.env.VITE_API_URL as string) || ''
 
 // Sentence templates for detected signs
 function buildSentence(sign: string): string {
