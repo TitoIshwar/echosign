@@ -4,34 +4,56 @@ import Webcam from 'react-webcam'
 import {
   Camera, CameraOff, Mic, MicOff, Download, Trash2,
   Hand, MessageSquare, Zap, Volume2, VolumeX, Activity,
-  RefreshCw
+  RefreshCw, WifiOff, Wifi
 } from 'lucide-react'
 import { useDemoStore } from '../store/demoStore'
 
-// Demo signs for simulation
-const demoSigns = [
-  { sign: 'Namaste', sentence: 'Namaste, greetings to you.', confidence: 98.7 },
-  { sign: 'Hello', sentence: 'Hello, how are you?', confidence: 96.2 },
-  { sign: 'Thank You', sentence: 'Thank you very much.', confidence: 97.4 },
-  { sign: 'Please', sentence: 'Please help me with this.', confidence: 94.8 },
-  { sign: 'Yes', sentence: 'Yes, I agree with that.', confidence: 99.1 },
-  { sign: 'No', sentence: 'No, that is not correct.', confidence: 95.5 },
-  { sign: 'Water', sentence: 'I need water, please.', confidence: 93.7 },
-  { sign: 'Help', sentence: 'I need help, please assist me.', confidence: 91.3 },
-  { sign: 'Good Morning', sentence: 'Good morning, have a nice day!', confidence: 97.8 },
-  { sign: 'My Name', sentence: 'My name is — nice to meet you.', confidence: 95.0 },
-]
+const API_URL = 'http://localhost:8000'
 
-// Hand landmark positions for visualization (21 points)
-const LANDMARKS = [
-  { x: 0.5, y: 0.75 },   // 0 - wrist
-  { x: 0.45, y: 0.65 }, { x: 0.42, y: 0.55 }, { x: 0.40, y: 0.47 }, { x: 0.38, y: 0.40 }, // thumb
-  { x: 0.52, y: 0.60 }, { x: 0.51, y: 0.46 }, { x: 0.51, y: 0.36 }, { x: 0.51, y: 0.28 }, // index
-  { x: 0.56, y: 0.59 }, { x: 0.57, y: 0.45 }, { x: 0.57, y: 0.34 }, { x: 0.57, y: 0.26 }, // middle
-  { x: 0.61, y: 0.61 }, { x: 0.62, y: 0.48 }, { x: 0.62, y: 0.37 }, { x: 0.62, y: 0.29 }, // ring
-  { x: 0.65, y: 0.65 }, { x: 0.67, y: 0.54 }, { x: 0.68, y: 0.44 }, { x: 0.69, y: 0.36 }, // pinky
-]
+// Sentence templates for detected signs
+function buildSentence(sign: string): string {
+  const templates: Record<string, string> = {
+    'A': 'The letter A.',
+    'B': 'The letter B.',
+    'C': 'The letter C.',
+    'D': 'The letter D.',
+    'E': 'The letter E.',
+    'F': 'The letter F.',
+    'G': 'The letter G.',
+    'H': 'The letter H.',
+    'I': 'The letter I.',
+    'J': 'The letter J.',
+    'K': 'The letter K.',
+    'L': 'The letter L.',
+    'M': 'The letter M.',
+    'N': 'The letter N.',
+    'O': 'The letter O.',
+    'P': 'The letter P.',
+    'Q': 'The letter Q.',
+    'R': 'The letter R.',
+    'S': 'The letter S.',
+    'T': 'The letter T.',
+    'U': 'The letter U.',
+    'V': 'The letter V.',
+    'W': 'The letter W.',
+    'X': 'The letter X.',
+    'Y': 'The letter Y.',
+    'Z': 'The letter Z.',
+    'Hello': 'Hello, how are you?',
+    'Namaste': 'Namaste, greetings to you.',
+    'Thank You': 'Thank you very much.',
+    'Please': 'Please help me with this.',
+    'Yes': 'Yes, I agree with that.',
+    'No': 'No, that is not correct.',
+    'Water': 'I need water, please.',
+    'Help': 'I need help, please assist me.',
+    'Good Morning': 'Good morning, have a nice day!',
+    'My Name': 'My name is — nice to meet you.',
+  }
+  return templates[sign] ?? `Detected sign: ${sign}.`
+}
 
+// MediaPipe landmark connections
 const CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],
   [0,5],[5,6],[6,7],[7,8],
@@ -41,10 +63,18 @@ const CONNECTIONS = [
   [5,9],[9,13],[13,17],
 ]
 
-function HandCanvas({ active }: { active: boolean }) {
+type Landmark = { x: number; y: number; z: number }
+
+function HandCanvas({ active, landmarks, handedness }: { active: boolean; landmarks: Landmark[][]; handedness: string[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animFrame = useRef<number>(0)
-  const timeRef = useRef(0)
+  const landmarksRef = useRef<Landmark[][]>(landmarks)
+  const handednessRef = useRef<string[]>(handedness)
+
+  useEffect(() => {
+    landmarksRef.current = landmarks
+    handednessRef.current = handedness
+  }, [landmarks, handedness])
 
   useEffect(() => {
     if (!active) return
@@ -54,69 +84,94 @@ function HandCanvas({ active }: { active: boolean }) {
     if (!ctx) return
 
     const draw = (t: number) => {
-      timeRef.current = t
       const W = canvas.width
       const H = canvas.height
       ctx.clearRect(0, 0, W, H)
 
-      // Subtle noise for "live" feeling
-      const jitter = (v: number) => v + (Math.sin(t * 0.003 + v * 100) * 0.008)
+      if (landmarksRef.current && landmarksRef.current.length > 0) {
+        landmarksRef.current.forEach((handPts, handIdx) => {
+          if (handPts.length !== 21) return
+          const pts = handPts.map(lm => ({ x: lm.x * W, y: lm.y * H }))
 
-      // Map landmarks to canvas
-      const pts = LANDMARKS.map(({ x, y }) => ({
-        x: jitter(x) * W,
-        y: jitter(y) * H,
-      }))
+          // Draw connections
+          CONNECTIONS.forEach(([from, to]) => {
+            const p1 = pts[from], p2 = pts[to]
+            const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y)
+            grad.addColorStop(0, 'rgba(79,70,229,0.8)')
+            grad.addColorStop(1, 'rgba(6,182,212,0.6)')
+            ctx.beginPath()
+            ctx.moveTo(p1.x, p1.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.strokeStyle = grad
+            ctx.lineWidth = 2
+            ctx.lineCap = 'round'
+            ctx.stroke()
+          })
 
-      // Draw connections
-      CONNECTIONS.forEach(([from, to]) => {
-        const p1 = pts[from]
-        const p2 = pts[to]
-        const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y)
-        grad.addColorStop(0, 'rgba(79,70,229,0.7)')
-        grad.addColorStop(1, 'rgba(6,182,212,0.5)')
-        ctx.beginPath()
-        ctx.moveTo(p1.x, p1.y)
-        ctx.lineTo(p2.x, p2.y)
-        ctx.strokeStyle = grad
-        ctx.lineWidth = 1.5
-        ctx.lineCap = 'round'
-        ctx.stroke()
-      })
+          // Draw points
+          pts.forEach((pt, i) => {
+            const pulse = 1 + Math.sin(t * 0.004 + i * 0.5) * 0.2
+            const r = (i === 0 ? 6 : 4) * pulse
 
-      // Draw points
-      pts.forEach((pt, i) => {
-        const pulse = 1 + Math.sin(t * 0.004 + i * 0.5) * 0.3
-        const r = (i === 0 ? 6 : 4) * pulse
+            const grd = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, r * 3)
+            grd.addColorStop(0, i === 0 ? 'rgba(79,70,229,0.5)' : 'rgba(6,182,212,0.4)')
+            grd.addColorStop(1, 'transparent')
+            ctx.beginPath()
+            ctx.arc(pt.x, pt.y, r * 3, 0, Math.PI * 2)
+            ctx.fillStyle = grd
+            ctx.fill()
 
-        // Outer glow
-        const grd = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, r * 3)
-        grd.addColorStop(0, i === 0 ? 'rgba(79,70,229,0.4)' : 'rgba(6,182,212,0.3)')
-        grd.addColorStop(1, 'transparent')
-        ctx.beginPath()
-        ctx.arc(pt.x, pt.y, r * 3, 0, Math.PI * 2)
-        ctx.fillStyle = grd
-        ctx.fill()
+            ctx.beginPath()
+            ctx.arc(pt.x, pt.y, r * 0.7, 0, Math.PI * 2)
+            ctx.fillStyle = i === 0 ? '#4F46E5' : '#06B6D4'
+            ctx.fill()
+          })
 
-        // Core dot
-        ctx.beginPath()
-        ctx.arc(pt.x, pt.y, r * 0.7, 0, Math.PI * 2)
-        ctx.fillStyle = i === 0 ? '#4F46E5' : '#06B6D4'
-        ctx.fill()
-      })
+          // Bounding box
+          const xs = pts.map(p => p.x)
+          const ys = pts.map(p => p.y)
+          ctx.strokeStyle = 'rgba(79,70,229,0.3)'
+          ctx.lineWidth = 1
+          ctx.setLineDash([4, 4])
+          ctx.strokeRect(
+            Math.min(...xs) - 12, Math.min(...ys) - 12,
+            Math.max(...xs) - Math.min(...xs) + 24,
+            Math.max(...ys) - Math.min(...ys) + 24,
+          )
+          ctx.setLineDash([])
 
-      // Bounding box
-      const xs = pts.map(p => p.x)
-      const ys = pts.map(p => p.y)
-      const minX = Math.min(...xs) - 16
-      const minY = Math.min(...ys) - 16
-      const maxX = Math.max(...xs) + 16
-      const maxY = Math.max(...ys) + 16
-      ctx.strokeStyle = 'rgba(79,70,229,0.3)'
-      ctx.lineWidth = 1
-      ctx.setLineDash([4, 4])
-      ctx.strokeRect(minX, minY, maxX - minX, maxY - minY)
-      ctx.setLineDash([])
+          // Handedness Label next to wrist
+          const label = handednessRef.current[handIdx] || 'Hand'
+          ctx.fillStyle = '#E0E7FF'
+          ctx.font = 'bold 12px sans-serif'
+          ctx.fillText(label, pts[0].x + 10, pts[0].y - 10)
+        })
+
+        // Draw global debug overlay
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
+        ctx.fillRect(10, 10, 180, 75)
+        ctx.strokeStyle = 'rgba(129, 140, 248, 0.4)'
+        ctx.strokeRect(10, 10, 180, 75)
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 11px monospace'
+        ctx.fillText(`HANDS DETECTED : ${landmarksRef.current.length}`, 20, 30)
+        landmarksRef.current.forEach((handPts, idx) => {
+          const lbl = handednessRef.current[idx] || 'Unknown'
+          ctx.fillText(`Hand ${idx + 1}        : ${lbl} (${handPts.length} pts)`, 20, 48 + idx * 15)
+        })
+      } else {
+        // Idle animation when no hand detected
+        const cx = W / 2, cy = H / 2
+        const rings = [60, 90, 120]
+        rings.forEach((r, i) => {
+          const alpha = 0.08 + 0.05 * Math.sin(t * 0.002 + i)
+          ctx.beginPath()
+          ctx.arc(cx, cy, r, 0, Math.PI * 2)
+          ctx.strokeStyle = `rgba(79,70,229,${alpha})`
+          ctx.lineWidth = 1
+          ctx.stroke()
+        })
+      }
 
       animFrame.current = requestAnimationFrame(draw)
     }
@@ -137,13 +192,14 @@ function HandCanvas({ active }: { active: boolean }) {
   )
 }
 
+
 function ConfidenceBar({ value }: { value: number }) {
-  const color = value >= 95 ? '#22C55E' : value >= 80 ? '#06B6D4' : '#F59E0B'
+  const color = value >= 90 ? '#22C55E' : value >= 70 ? '#06B6D4' : '#F59E0B'
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between text-xs">
         <span style={{ color: 'var(--text-subtle)' }}>Confidence</span>
-        <span className="font-bold" style={{ color }}>{ value.toFixed(1)}%</span>
+        <span className="font-bold" style={{ color }}>{value.toFixed(1)}%</span>
       </div>
       <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--card-hover)' }}>
         <motion.div
@@ -151,7 +207,7 @@ function ConfidenceBar({ value }: { value: number }) {
           style={{ background: `linear-gradient(90deg, #4F46E5, ${color})` }}
           initial={{ width: 0 }}
           animate={{ width: `${value}%` }}
-          transition={{ duration: 0.8, ease: 'easeOut' }}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
         />
       </div>
     </div>
@@ -190,44 +246,141 @@ export default function LiveDemo() {
   } = useDemoStore()
 
   const webcamRef = useRef<Webcam>(null)
-  const simulationRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const signIndexRef = useRef(0)
+  const loopActiveRef = useRef(false)
+  const loopTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [webcamError, setWebcamError] = useState(false)
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking')
+  const [landmarks, setLandmarks] = useState<Landmark[][]>([])
+  const [handedness, setHandedness] = useState<string[]>([])
+  const [fps, setFps] = useState(0)
+  const fpsCountRef = useRef(0)
+  const lastFpsTime = useRef(Date.now())
 
-  // Simulate real-time sign detection
-  const startSimulation = useCallback(() => {
-    simulationRef.current = setInterval(() => {
-      const idx = signIndexRef.current % demoSigns.length
-      const demo = demoSigns[idx]
-      setDetectedSign(demo.sign, demo.sentence, demo.confidence)
-      addToTranscript(demo.sign, demo.sentence)
-      signIndexRef.current++
-    }, 3500)
+  // ── Check backend health ──────────────────────────────────────────────────
+  const checkBackend = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/health`, { signal: AbortSignal.timeout(2000) })
+      if (res.ok) {
+        setBackendStatus('online')
+        return true
+      }
+    } catch {
+      /* ignore */
+    }
+    setBackendStatus('offline')
+    return false
+  }, [])
+
+  useEffect(() => {
+    checkBackend()
+    const t = setInterval(checkBackend, 5000)
+    return () => clearInterval(t)
+  }, [checkBackend])
+
+  // ── Prediction loop (recursive setTimeout — never overlapping) ───────────
+  const startPredictionLoop = useCallback(() => {
+    loopActiveRef.current = true
+    let lastSign = ''
+
+    const tick = async () => {
+      if (!loopActiveRef.current) return
+
+      const screenshot = webcamRef.current?.getScreenshot()
+      if (!screenshot) {
+        loopTimerRef.current = setTimeout(tick, 200)
+        return
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/predict`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: screenshot }),
+          signal: AbortSignal.timeout(4000),
+        })
+
+        // 429 = backend busy with previous frame — silently skip, stay online
+        if (res.status === 429) {
+          if (loopActiveRef.current) loopTimerRef.current = setTimeout(tick, 50)
+          return
+        }
+
+        if (!res.ok) {
+          if (loopActiveRef.current) loopTimerRef.current = setTimeout(tick, 500)
+          return
+        }
+
+        const data = await res.json()
+
+        // Update FPS counter
+        fpsCountRef.current++
+        const now = Date.now()
+        if (now - lastFpsTime.current >= 1000) {
+          setFps(fpsCountRef.current)
+          fpsCountRef.current = 0
+          lastFpsTime.current = now
+        }
+
+        if (data.hand_detected && data.sign && data.sign !== 'No hand detected') {
+          setBackendStatus('online')
+          const sentence = buildSentence(data.sign)
+          setDetectedSign(data.sign, sentence, data.confidence)
+
+          if (data.sign !== lastSign) {
+            addToTranscript(data.sign, sentence)
+            lastSign = data.sign
+          }
+
+          if (data.landmarks) {
+            setLandmarks(data.landmarks)
+            setHandedness(data.handedness || [])
+          }
+        } else {
+          setLandmarks([])
+          setHandedness([])
+          if (data.sign === 'No hand detected') {
+            setDetectedSign('Waiting...', 'Show your hand to the camera', 0)
+          }
+        }
+
+      } catch (err: unknown) {
+        // AbortError = our own timeout — backend may still be running, don't mark offline
+        const isAbort = err instanceof Error && err.name === 'AbortError'
+        if (!isAbort) setBackendStatus('offline')
+      }
+
+      // Schedule next frame only after this one fully completes
+      if (loopActiveRef.current) loopTimerRef.current = setTimeout(tick, 100)
+    }
+
+    tick()
   }, [setDetectedSign, addToTranscript])
 
-  const stopSimulation = useCallback(() => {
-    if (simulationRef.current) {
-      clearInterval(simulationRef.current)
-      simulationRef.current = null
+  const stopPredictionLoop = useCallback(() => {
+    loopActiveRef.current = false
+    if (loopTimerRef.current) {
+      clearTimeout(loopTimerRef.current)
+      loopTimerRef.current = null
     }
+    setLandmarks([])
+    setHandedness([])
+    setFps(0)
   }, [])
 
   const handleToggleWebcam = () => {
     if (isWebcamActive) {
-      stopSimulation()
+      stopPredictionLoop()
       setDetectedSign('Waiting...', 'Activate webcam to begin recognition', 0)
     } else {
-      startSimulation()
+      startPredictionLoop()
     }
     toggleWebcam()
   }
 
   const handleSpeak = () => {
     if (!window.speechSynthesis) return
-
     const synth = window.speechSynthesis
 
-    // Stop if already speaking
     if (isSpeaking) {
       synth.cancel()
       setIsSpeaking(false)
@@ -244,13 +397,9 @@ export default function LiveDemo() {
     utterance.onend = () => setIsSpeaking(false)
     utterance.onerror = () => setIsSpeaking(false)
 
-    // Chrome often pauses speechSynthesis silently — resume() wakes it up.
-    // Do NOT call cancel() before speak() — that is what was breaking it.
     if (synth.paused) synth.resume()
     synth.speak(utterance)
   }
-
-
 
   const handleExport = () => {
     const content = transcript
@@ -265,7 +414,7 @@ export default function LiveDemo() {
     URL.revokeObjectURL(url)
   }
 
-  useEffect(() => () => stopSimulation(), [stopSimulation])
+  useEffect(() => () => stopPredictionLoop(), [stopPredictionLoop])
 
   return (
     <section
@@ -297,8 +446,24 @@ export default function LiveDemo() {
             Real-Time <span className="gradient-text">ISL Recognition</span>
           </h2>
           <p className="text-base max-w-xl mx-auto text-center leading-[1.75]" style={{ color: 'var(--text-muted)' }}>
-            Activate your webcam to begin. All processing runs locally in your browser — nothing leaves your device.
+            Activate your webcam to begin. All processing runs locally — nothing leaves your device.
           </p>
+
+          {/* Backend status pill */}
+          <div className={`mt-4 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium border ${
+            backendStatus === 'online'
+              ? 'bg-[#22C55E]/10 border-[#22C55E]/30 text-[#4ADE80]'
+              : backendStatus === 'offline'
+              ? 'bg-red-500/10 border-red-500/30 text-red-400'
+              : 'bg-[#64748B]/10 border-[#64748B]/30 text-[#64748B]'
+          }`}>
+            {backendStatus === 'online'
+              ? <><Wifi size={11} /> Model API Online</>
+              : backendStatus === 'offline'
+              ? <><WifiOff size={11} /> Model API Offline — run backend/main.py</>
+              : <><span className="w-2 h-2 rounded-full bg-current animate-pulse" /> Checking API...</>
+            }
+          </div>
         </motion.div>
 
         {/* Demo interface */}
@@ -331,6 +496,8 @@ export default function LiveDemo() {
                     ref={webcamRef}
                     className="w-full h-full object-cover"
                     mirrored
+                    screenshotFormat="image/jpeg"
+                    screenshotQuality={0.6}
                     onUserMediaError={() => setWebcamError(true)}
                     aria-label="Live webcam feed"
                   />
@@ -341,7 +508,7 @@ export default function LiveDemo() {
                         <div className="w-16 h-16 rounded-2xl bg-red-500/10 flex items-center justify-center">
                           <CameraOff size={28} className="text-red-400" aria-hidden="true" />
                         </div>
-                        <p className="text-sm text-center px-4" style={{ color: 'var(--text-subtle)' }}>Camera access denied. Using simulation mode.</p>
+                        <p className="text-sm text-center px-4" style={{ color: 'var(--text-subtle)' }}>Camera access denied.</p>
                         <button onClick={() => { setWebcamError(false); handleToggleWebcam() }} className="btn-secondary text-sm py-2 px-4">
                           <RefreshCw size={14} />
                           Retry
@@ -415,7 +582,7 @@ export default function LiveDemo() {
                   backgroundSize: '24px 24px'
                 }} aria-hidden="true" />
 
-                <HandCanvas active={isWebcamActive} />
+                <HandCanvas active={isWebcamActive} landmarks={landmarks} handedness={handedness} />
 
                 {!isWebcamActive && (
                   <div className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
@@ -423,18 +590,24 @@ export default function LiveDemo() {
                   </div>
                 )}
 
+                {isWebcamActive && landmarks.length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                    <p className="text-xs text-center" style={{ color: 'var(--text-subtle)' }}>Show your hand<br />to the camera</p>
+                  </div>
+                )}
+
                 {/* Info overlay */}
                 <div className="absolute top-3 right-3 glass rounded-lg px-2 py-1 text-xs" style={{ color: 'var(--text-subtle)' }} aria-hidden="true">
-                  21 points
+                  {landmarks.length > 0 ? `${landmarks.length * 21} points` : '0 points'}
                 </div>
               </div>
 
               {/* Stats bar */}
               <div className="p-5 grid grid-cols-3 gap-4" style={{ borderTop: '1px solid var(--border-color)' }}>
                 {[
-                  { label: 'Points', value: isWebcamActive ? '21' : '—', color: '#818CF8' },
-                  { label: 'FPS', value: isWebcamActive ? '30' : '—', color: '#22D3EE' },
-                  { label: 'Model', value: 'v2.1', color: '#4ADE80' },
+                  { label: 'Points', value: isWebcamActive && landmarks.length > 0 ? String(landmarks.length * 21) : '—', color: '#818CF8' },
+                  { label: 'FPS', value: isWebcamActive ? String(fps) : '—', color: '#22D3EE' },
+                  { label: 'API', value: backendStatus === 'online' ? 'Live' : 'Off', color: backendStatus === 'online' ? '#4ADE80' : '#f87171' },
                 ].map(stat => (
                   <div key={stat.label} className="text-center">
                     <div className="text-base font-bold mb-0.5" style={{ color: stat.color }}>{stat.value}</div>
@@ -494,7 +667,6 @@ export default function LiveDemo() {
                       className="text-base font-medium leading-[1.75]"
                       style={{ color: 'var(--text-primary)' }}
                       aria-live="polite"
-                      aria-label={`Generated sentence: ${generatedSentence}`}
                     >
                       {generatedSentence}
                     </motion.p>
@@ -515,7 +687,7 @@ export default function LiveDemo() {
                   <button
                     id="speak-btn"
                     onClick={handleSpeak}
-                    disabled={generatedSentence === 'Activate webcam to begin recognition'}
+                    disabled={!generatedSentence || generatedSentence === 'Activate webcam to begin recognition'}
                     className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold bg-[#22C55E]/10 border border-[#22C55E]/20 text-[#4ADE80] hover:bg-[#22C55E]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     aria-label="Speak the generated sentence"
                   >
